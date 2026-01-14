@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentinel — SSH Attack Monitor | Sanyam Garg</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+    <div class="dashboard">
+        
+        <aside class="sidebar">
+            
+            <header class="brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>Sentinel</h1>
+                    <span>SSH Attack Monitor</span>
+                </div>
+            </header>
+
+            <section class="about">
+                <h2>What is this?</h2>
+                <p>
+                    I built this dashboard to visualize who's trying to break into my server. 
+                    Every dot you see on the map is a <strong>real unauthorized login attempt</strong> 
+                    happening against my server in Buffalo, NY.
+                </p>
+                <p>
+                    It's kind of wild — within minutes of exposing SSH to the internet, bots from 
+                    around the world start hammering away with common usernames like "root" and "admin". 
+                    This project lets me watch it happen in real-time.
+                </p>
+                <p>
+                    The dashboard displays attacks from the <strong>last hour</strong> — older data is automatically cleared.
+                </p>
+                <p>
+                    This is one of my portfolio projects. Check out my other work:
+                </p>
+                <a href="https://sanyamgarg.com" target="_blank" rel="noopener noreferrer" class="portfolio-btn">
+                    Visit My Portfolio
+                </a>
+                
+                <h3>How I Built It</h3>
+                <ol class="how-it-works">
+                    <li>
+                        <span class="step-num">1</span>
+                        <div>
+                            <strong>Log Collection</strong>
+                            <p>My server runs systemd, which logs every failed SSH attempt. I tail these logs over an SSH tunnel.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="step-num">2</span>
+                        <div>
+                            <strong>IP Geolocation</strong>
+                            <p>A Python script extracts attacker IPs and geolocates them using the MaxMind GeoLite2 database.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="step-num">3</span>
+                        <div>
+                            <strong>Data Pipeline</strong>
+                            <p>Attack data flows into SQLite and gets served through a FastAPI endpoint that this frontend polls.</p>
+                        </div>
+                    </li>
+                    <li>
+                        <span class="step-num">4</span>
+                        <div>
+                            <strong>Live Visualization</strong>
+                            <p>This dashboard fetches new attacks every 1.5 seconds and animates them on the map with Leaflet.js.</p>
+                        </div>
+                    </li>
+                </ol>
+
+                <div class="tech-stack">
+                    <h3>Tech Stack</h3>
+                    <div class="tech-tags">
+                        <span>Python</span>
+                        <span>FastAPI</span>
+                        <span>SQLite</span>
+                        <span>Leaflet.js</span>
+                        <span>Chart.js</span>
+                        <span>Docker</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="stats">
+                <h2>Live Statistics</h2>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <span class="stat-value" id="total-attacks">-</span>
+                        <span class="stat-label">Attacks (1 hour)</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="last-60">-</span>
+                        <span class="stat-label">Last 60 Seconds</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="unique-ips">-</span>
+                        <span class="stat-label">Unique IPs</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="unique-countries">-</span>
+                        <span class="stat-label">Countries</span>
+                    </div>
+                </div>
+            </section>
+
+            <div class="connection-status" id="connection-status">
+                <span class="status-dot"></span>
+                <span>Connecting...</span>
+            </div>
+
+        </aside>
+
+        <main class="main-content">
+            
+            <section class="map-section">
+                <div class="section-header">
+                    <h2>Live Attack Map</h2>
+                    <p>Each line shows an attack traveling from its origin to my server in Buffalo, NY.</p>
+                </div>
+                <div class="map-wrapper">
+                    <div id="map"></div>
+                    <div class="map-legend">
+                        <div class="legend-item">
+                            <span class="legend-dot target"></span>
+                            <span>My Server (Buffalo, NY)</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-dot attack"></span>
+                            <span>Incoming Attack</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="bottom-row">
+                
+                <section class="charts-section">
+                    <div class="chart-card">
+                        <div class="section-header">
+                            <h2>Most Targeted Usernames</h2>
+                            <p>The usernames attackers try most often</p>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="userChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="section-header">
+                            <h2>Attacks by Country</h2>
+                            <p>Where the attacks are coming from</p>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="countryChart"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="log-section">
+                    <div class="section-header">
+                        <h2>Recent Attacks</h2>
+                        <p>Live feed of incoming attack attempts</p>
+                    </div>
+                    <div class="log-feed" id="log-list">
+                        <div class="log-empty">
+                            <span>Waiting for attacks...</span>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+
+        </main>
+
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

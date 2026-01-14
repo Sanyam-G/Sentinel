@@ -1,0 +1,16 @@
+services:
+  sentinel:
+    build: .
+    container_name: sentinel
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TARGET_HOST=${TARGET_HOST}
+      - TARGET_USER=${TARGET_USER}
+      - DB_PATH=/data/sentinel.db
+    volumes:
+      - ./data:/data
+      - ./static:/app/static
+      # Ensure you mount a valid SSH key from your host
+      - ~/.ssh/id_rsa:/app/ssh_key:ro

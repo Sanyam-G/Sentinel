@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Database and GeoIP
+data/*.db
+data/*.mmdb
+
+# Environment variables
+.env
+
+# OS
+.DS_Store
