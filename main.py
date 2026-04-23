@@ -18,6 +18,7 @@ DB_PATH = os.getenv("DB_PATH", "/data/sentinel.db")
 GEOIP_PATH = os.getenv("GEOIP_PATH", "/data/GeoLite2-City.mmdb")
 DATA_RETENTION_HOURS = 1
 TIMEZONE = ZoneInfo("America/New_York")
+STARTED_AT = time.time()
 
 app = FastAPI()
 
@@ -239,7 +240,8 @@ def get_stats():
         "total": total,
         "unique_ips": unique_ips,
         "unique_countries": unique_countries,
-        "last_60_seconds": last_60
+        "last_60_seconds": last_60,
+        "uptime_seconds": int(time.time() - STARTED_AT)
     }
 
 

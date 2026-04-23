@@ -405,48 +405,52 @@ body::before {
 }
 
 #map-svg .target-dot {
-    fill: var(--fg);
-    stroke: var(--bg);
-    stroke-width: 1.5;
+    fill: var(--accent);
 }
 
 #map-svg .target-ring {
     fill: none;
     stroke: var(--accent);
-    stroke-width: 1.2;
-    animation: ring-pulse 1.8s ease-out infinite;
+    stroke-width: 1;
+    animation: ring-pulse 1.4s linear infinite;
 }
 
 @keyframes ring-pulse {
-    0% { r: 5; opacity: 1; }
-    100% { r: 22; opacity: 0; }
+    0% { r: 4; opacity: 1; }
+    100% { r: 18; opacity: 0; }
 }
 
-#map-svg .impact {
-    fill: none;
+#map-svg .target-cross {
     stroke: var(--accent);
-    stroke-width: 2;
-    opacity: 0.9;
+    stroke-width: 1;
 }
 
 #map-svg .attack-arc {
     fill: none;
     stroke: var(--accent);
-    stroke-width: 1.6;
-    stroke-opacity: 0.85;
-    stroke-dasharray: 4 3;
+    stroke-width: 1;
+    stroke-opacity: 1;
+    stroke-linecap: butt;
 }
 
-#map-svg .attack-dot {
+#map-svg .attack-projectile {
     fill: var(--accent);
-    stroke: var(--bg);
-    stroke-width: 0.8;
-    filter: drop-shadow(0 0 3px rgba(229, 35, 27, 0.8));
 }
 
-#map-svg .attack-halo {
+#map-svg .origin-tick {
+    stroke: var(--accent);
+    stroke-width: 1.2;
+    stroke-linecap: butt;
+}
+
+#map-svg .impact-cross {
+    stroke: var(--accent);
+    stroke-width: 1.2;
+}
+
+#map-svg .impact-square {
     fill: var(--accent);
-    opacity: 0.25;
+    stroke: none;
 }
 
 .legend {

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=VT323&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260423d" />
+    <link rel="stylesheet" href="style.css?v=20260423g" />
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     </div>
     <div class="strip-cell led-cell" id="led-row"></div>
     <div class="strip-cell stacked">
-        <span class="mono-tiny">LOCAL_TIME</span>
+        <span class="mono-tiny">TARGET_TIME</span>
         <span class="mono-big" id="top-clock">--:--:--</span>
     </div>
     <div class="strip-cell status" id="top-status"><span class="dot"></span>CONNECTING</div>
@@ -96,7 +96,7 @@
             <div class="map-wrap">
                 <svg id="map-svg" preserveAspectRatio="xMidYMid meet"></svg>
                 <div class="map-overlay-tr">LAT_42.88 // LON_-78.87</div>
-                <div class="map-overlay-bl">RASERV.BUFFALO_NY</div>
+                <div class="map-overlay-bl">TARGET // BUFFALO_NY</div>
             </div>
         </section>
 
@@ -131,6 +131,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="script.js?v=20260423d"></script>
+<script src="script.js?v=20260423g"></script>
 </body>
 </html>

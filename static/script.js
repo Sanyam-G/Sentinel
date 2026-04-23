@@ -2,9 +2,9 @@
     'use strict';
 
     const CONFIG = {
-        target: { coords: [42.8864, -78.8784], name: 'RASERV', location: 'Buffalo, NY' },
+        target: { coords: [42.8864, -78.8784], name: 'TARGET', location: 'Buffalo, NY' },
         polling: { interval: 1500, endpoint: '/api/poll', statsEndpoint: '/api/stats' },
-        animation: { duration: { min: 1800, max: 2800 }, arcFadeTime: 60000 },
+        animation: { duration: { min: 550, max: 850 }, arcFadeTime: 30000 },
         ui: { maxLogItems: 100, ledCount: 14, sparkSeconds: 60 },
         worldDataUrl: 'https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json'
     };
@@ -70,22 +70,43 @@
         mapSvg: document.getElementById('map-svg')
     };
 
-    const bootTime = Date.now();
+    // Service uptime: computed from server-supplied uptime_seconds + local drift
+    state.serverUptimeAtLoad = null;  // seconds reported by server the first time
+    state.uptimeLoadMoment = null;    // local Date.now() when we received it
 
-    /* ---------- Clock + uptime ---------- */
+    function setServerUptime(seconds) {
+        state.serverUptimeAtLoad = seconds;
+        state.uptimeLoadMoment = Date.now();
+    }
+
+    function currentUptimeSeconds() {
+        if (state.serverUptimeAtLoad == null) return null;
+        return state.serverUptimeAtLoad + Math.floor((Date.now() - state.uptimeLoadMoment) / 1000);
+    }
 
     function tickClock() {
         const now = new Date();
-        const hh = String(now.getHours()).padStart(2, '0');
-        const mm = String(now.getMinutes()).padStart(2, '0');
-        const ss = String(now.getSeconds()).padStart(2, '0');
+        // Target server is in Buffalo, NY. Match the attack-log timezone.
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/New_York',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        }).formatToParts(now);
+        const get = function(t) { const p = parts.find(function(x) { return x.type === t; }); return p ? p.value : '00'; };
+        let hh = get('hour'); if (hh === '24') hh = '00';
+        const mm = get('minute'), ss = get('second');
         if (dom.topClock) dom.topClock.textContent = hh + ':' + mm + ':' + ss;
 
-        const elapsed = Math.floor((Date.now() - bootTime) / 1000);
-        const eh = String(Math.floor(elapsed / 3600)).padStart(2, '0');
-        const em = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
-        const es = String(elapsed % 60).padStart(2, '0');
-        if (dom.topUptime) dom.topUptime.textContent = eh + ':' + em + ':' + es;
+        if (dom.topUptime) {
+            const up = currentUptimeSeconds();
+            if (up == null) {
+                dom.topUptime.textContent = '--:--:--';
+            } else {
+                const eh = String(Math.floor(up / 3600)).padStart(2, '0');
+                const em = String(Math.floor((up % 3600) / 60)).padStart(2, '0');
+                const es = String(up % 60).padStart(2, '0');
+                dom.topUptime.textContent = eh + ':' + em + ':' + es;
+            }
+        }
     }
 
     /* ---------- Diagnostic LED row ---------- */
@@ -184,11 +205,20 @@
             state.svg.append('g').attr('class', 'projectiles');
             state.svg.append('g').attr('class', 'targets');
 
-            // Target marker (Buffalo)
+            // Target marker (Buffalo): square + crosshair + pulse ring
             const [tx, ty] = state.projection([CONFIG.target.coords[1], CONFIG.target.coords[0]]);
             const tg = state.svg.select('.targets');
-            tg.append('circle').attr('class', 'target-ring').attr('cx', tx).attr('cy', ty).attr('r', 5);
-            tg.append('circle').attr('class', 'target-dot').attr('cx', tx).attr('cy', ty).attr('r', 4);
+            // Crosshair arms
+            tg.append('line').attr('class', 'target-cross').attr('x1', tx - 10).attr('y1', ty).attr('x2', tx - 4).attr('y2', ty);
+            tg.append('line').attr('class', 'target-cross').attr('x1', tx + 4).attr('y1', ty).attr('x2', tx + 10).attr('y2', ty);
+            tg.append('line').attr('class', 'target-cross').attr('x1', tx).attr('y1', ty - 10).attr('x2', tx).attr('y2', ty - 4);
+            tg.append('line').attr('class', 'target-cross').attr('x1', tx).attr('y1', ty + 4).attr('x2', tx).attr('y2', ty + 10);
+            // Core square
+            tg.append('rect').attr('class', 'target-dot')
+                .attr('x', tx - 2.5).attr('y', ty - 2.5)
+                .attr('width', 5).attr('height', 5);
+            // Pulse ring
+            tg.append('circle').attr('class', 'target-ring').attr('cx', tx).attr('cy', ty).attr('r', 4);
         } catch (e) {
             console.error('Map init error:', e);
         }
@@ -229,67 +259,90 @@
     }
 
     function spawnAttack(attack) {
-        if (!state.projection || !isValidCoords(attack.lat, attack.lon)) return;
+        if (!state.projection) return;
 
-        const [originX, originY] = state.projection([attack.lon, attack.lat]);
+        // Fall back to country centroid for IPs with country-only geolocation.
+        let lat = attack.lat, lon = attack.lon;
+        if (!isValidCoords(lat, lon)) {
+            const resolved = resolveCountryName(attack.country);
+            const feature = resolved && state.countryIndex.get(resolved);
+            if (feature && d3 && d3.geoCentroid) {
+                const c = d3.geoCentroid(feature);
+                if (c && isValidCoords(c[1], c[0])) { lon = c[0]; lat = c[1]; }
+            }
+        }
+        if (!isValidCoords(lat, lon)) return;
+
+        const [originX, originY] = state.projection([lon, lat]);
         const [tx, ty] = state.projection([CONFIG.target.coords[1], CONFIG.target.coords[0]]);
 
-        // Curved arc path (higher arc for drama)
-        const mx = (originX + tx) / 2;
-        const my = (originY + ty) / 2 - Math.min(90, Math.hypot(tx - originX, ty - originY) * 0.32);
-        const arcD = 'M' + originX + ',' + originY + ' Q' + mx + ',' + my + ' ' + tx + ',' + ty;
+        const arcs = state.svg.select('.arcs');
+        const projLayer = state.svg.select('.projectiles');
 
-        const arc = state.svg.select('.arcs').append('path')
+        // Straight ballistic line, drawn in as the projectile travels
+        const arcD = 'M' + originX + ',' + originY + ' L' + tx + ',' + ty;
+        const arc = arcs.append('path')
             .attr('class', 'attack-arc')
             .attr('d', arcD);
+        const arcLen = arc.node().getTotalLength();
+        arc.attr('stroke-dasharray', arcLen)
+            .attr('stroke-dashoffset', arcLen);
 
-        // Fade arc
-        arc.transition()
-            .delay(1500)
-            .duration(CONFIG.animation.arcFadeTime)
-            .style('stroke-opacity', 0)
-            .remove();
-
-        // Origin pulse
-        const originPulse = state.svg.select('.projectiles').append('circle')
-            .attr('class', 'impact')
-            .attr('cx', originX).attr('cy', originY).attr('r', 2);
-        originPulse.transition().duration(600)
-            .attr('r', 10).style('opacity', 0)
-            .on('end', function() { originPulse.remove(); });
-
-        // Projectile + halo
-        const pathNode = arc.node();
-        const totalLen = pathNode.getTotalLength();
-
-        const halo = state.svg.select('.projectiles').append('circle')
-            .attr('class', 'attack-halo')
-            .attr('r', 8);
-
-        const dot = state.svg.select('.projectiles').append('circle')
-            .attr('class', 'attack-dot')
-            .attr('r', 3.5);
+        // Origin tick marks: 4 short crossbars to call out launch point
+        const tick = 4;
+        const originTicks = projLayer.append('g');
+        originTicks.append('line').attr('class', 'origin-tick')
+            .attr('x1', originX - tick).attr('y1', originY).attr('x2', originX + tick).attr('y2', originY);
+        originTicks.append('line').attr('class', 'origin-tick')
+            .attr('x1', originX).attr('y1', originY - tick).attr('x2', originX).attr('y2', originY + tick);
+        originTicks.transition().delay(260).duration(300).style('opacity', 0)
+            .on('end', function() { originTicks.remove(); });
 
         const duration = CONFIG.animation.duration.min + Math.random() * (CONFIG.animation.duration.max - CONFIG.animation.duration.min);
+
+        // Draw the line in as the projectile travels (linear, not eased = precise/mechanical)
+        arc.transition().duration(duration).ease(d3.easeLinear)
+            .attr('stroke-dashoffset', 0);
+
+        // Fade the line after it arrives
+        arc.transition().delay(duration + 200)
+            .duration(CONFIG.animation.arcFadeTime)
+            .style('stroke-opacity', 0)
+            .on('end', function() { arc.remove(); });
+
+        // Single sharp square projectile, no halo
+        const size = 4;
+        const proj = projLayer.append('rect')
+            .attr('class', 'attack-projectile')
+            .attr('width', size).attr('height', size);
+
+        const pathNode = arc.node();
+        const totalLen = pathNode.getTotalLength();
         const startT = performance.now();
 
         function step(now) {
             const t = Math.min((now - startT) / duration, 1);
-            const eased = 1 - Math.pow(1 - t, 3);
-            const point = pathNode.getPointAtLength(totalLen * eased);
-            dot.attr('cx', point.x).attr('cy', point.y);
-            halo.attr('cx', point.x).attr('cy', point.y);
+            const point = pathNode.getPointAtLength(totalLen * t);
+            proj.attr('x', point.x - size / 2).attr('y', point.y - size / 2);
             if (t < 1) requestAnimationFrame(step);
             else {
-                dot.remove();
-                halo.remove();
-                // Impact flash at target
-                const impact = state.svg.select('.projectiles').append('circle')
-                    .attr('class', 'impact')
-                    .attr('cx', tx).attr('cy', ty).attr('r', 3);
-                impact.transition().duration(500)
-                    .attr('r', 24).style('opacity', 0)
-                    .on('end', function() { impact.remove(); });
+                proj.remove();
+                // Sharp impact: crosshair lines + square flash, very fast
+                const len = 9;
+                const cross = projLayer.append('g');
+                cross.append('line').attr('class', 'impact-cross')
+                    .attr('x1', tx - len).attr('y1', ty).attr('x2', tx + len).attr('y2', ty);
+                cross.append('line').attr('class', 'impact-cross')
+                    .attr('x1', tx).attr('y1', ty - len).attr('x2', tx).attr('y2', ty + len);
+                cross.transition().duration(220).style('opacity', 0)
+                    .on('end', function() { cross.remove(); });
+
+                const sq = projLayer.append('rect')
+                    .attr('class', 'impact-square')
+                    .attr('x', tx - 4).attr('y', ty - 4)
+                    .attr('width', 8).attr('height', 8);
+                sq.transition().duration(180).style('opacity', 0)
+                    .on('end', function() { sq.remove(); });
             }
         }
         requestAnimationFrame(step);
@@ -389,6 +442,9 @@
             dom.last60.textContent = data.last_60_seconds.toLocaleString();
             dom.uniqueIps.textContent = data.unique_ips.toLocaleString();
             dom.uniqueCountries.textContent = data.unique_countries.toLocaleString();
+            if (typeof data.uptime_seconds === 'number' && state.serverUptimeAtLoad == null) {
+                setServerUptime(data.uptime_seconds);
+            }
         } catch (e) { console.error('Stats error:', e); }
     }
 
