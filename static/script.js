@@ -52,7 +52,8 @@
         projection: null,
         pathGen: null,
         countryIndex: new Map(),
-        drawnCountries: new Set()
+        countryPaths: new Map(),
+        activatedCountries: new Set()
     };
 
     const dom = {
@@ -167,8 +168,18 @@
                 .attr('class', 'graticule')
                 .attr('d', state.pathGen);
 
-            // Empty layers (countries are added live as attacks arrive)
-            state.svg.append('g').attr('class', 'countries');
+            // Draw ALL countries dimmed on load; activate on attack
+            const countriesLayer = state.svg.append('g').attr('class', 'countries');
+            for (const f of geo.features) {
+                const name = f.properties && f.properties.name;
+                const node = countriesLayer.append('path')
+                    .datum(f)
+                    .attr('class', 'country')
+                    .attr('d', state.pathGen)
+                    .node();
+                if (name) state.countryPaths.set(name, node);
+            }
+
             state.svg.append('g').attr('class', 'arcs');
             state.svg.append('g').attr('class', 'projectiles');
             state.svg.append('g').attr('class', 'targets');
@@ -189,30 +200,25 @@
         return geoipName;
     }
 
-    function drawCountryIfNeeded(countryName, animate) {
+    function activateCountry(countryName, animate) {
         if (!state.svg || !countryName) return;
         const resolved = resolveCountryName(countryName);
-        if (state.drawnCountries.has(resolved)) return;
+        if (state.activatedCountries.has(resolved)) return;
 
-        const feature = state.countryIndex.get(resolved);
-        if (!feature) {
-            if (!state.drawnCountries.has('__unmatched__' + resolved)) {
-                state.drawnCountries.add('__unmatched__' + resolved);
+        const node = state.countryPaths.get(resolved);
+        if (!node) {
+            if (!state.activatedCountries.has('__unmatched__' + resolved)) {
+                state.activatedCountries.add('__unmatched__' + resolved);
                 console.log('unmatched country:', countryName, '->', resolved);
             }
             return;
         }
 
-        state.drawnCountries.add(resolved);
-
-        const path = state.svg.select('.countries').append('path')
-            .datum(feature)
-            .attr('class', 'country' + (animate ? ' fresh' : ''))
-            .attr('d', state.pathGen);
-
+        state.activatedCountries.add(resolved);
+        node.classList.add('active');
         if (animate) {
-            path.style('opacity', 0)
-                .transition().duration(500).style('opacity', 1);
+            node.classList.add('fresh');
+            setTimeout(function() { node.classList.remove('fresh'); }, 1000);
         }
     }
 
@@ -407,8 +413,8 @@
             chartStats.users[attack.user] = (chartStats.users[attack.user] || 0) + 1;
             chartStats.countries[attack.country || 'Unknown'] = (chartStats.countries[attack.country || 'Unknown'] || 0) + 1;
             addLogItem(attack, !isHistorical);
-            // Draw the country on the map if this is its first attack this session
-            drawCountryIfNeeded(attack.country, !isHistorical);
+            // Light up the country on its first attack this session
+            activateCountry(attack.country, !isHistorical);
             if (!isHistorical) {
                 spawnAttack(attack);
                 flickerLED();

@@ -374,11 +374,20 @@ body::before {
 #map-svg .country {
     fill: var(--bg);
     stroke: var(--fg);
-    stroke-width: 0.6;
-    stroke-opacity: 0.7;
+    stroke-width: 0.4;
+    stroke-opacity: 0.18;
+    fill-opacity: 0.35;
+    transition: stroke-opacity 400ms, fill-opacity 400ms, fill 400ms;
 }
 
-#map-svg .country.fresh {
+#map-svg .country.active {
+    stroke-opacity: 0.85;
+    stroke-width: 0.6;
+    fill: var(--bg);
+    fill-opacity: 1;
+}
+
+#map-svg .country.active.fresh {
     animation: country-flash 900ms ease-out;
 }
 
