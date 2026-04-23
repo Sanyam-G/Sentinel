@@ -2,13 +2,21 @@
     'use strict';
 
     const CONFIG = {
-        target: { coords: [42.8864, -78.8784], name: 'My Server', location: 'Buffalo, NY' },
+        target: { coords: [42.8864, -78.8784], name: 'RASERV', location: 'Buffalo, NY' },
         polling: { interval: 1500, endpoint: '/api/poll', statsEndpoint: '/api/stats' },
-        animation: { duration: { min: 1800, max: 2800 }, trailFadeTime: 60000 },
-        ui: { maxLogItems: 100 }
+        animation: { duration: { min: 1800, max: 2800 }, arcFadeTime: 60000 },
+        ui: { maxLogItems: 100, ledCount: 14, sparkSeconds: 60 },
+        worldDataUrl: 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
     };
 
-    const state = { lastId: 0, trails: [], attacksInLog: [] };
+    const state = {
+        lastId: 0,
+        attacksInLog: [],
+        spark: new Array(CONFIG.ui.sparkSeconds).fill(0),
+        svg: null,
+        projection: null,
+        pathGen: null
+    };
 
     const dom = {
         totalAttacks: document.getElementById('total-attacks'),
@@ -16,47 +24,218 @@
         uniqueIps: document.getElementById('unique-ips'),
         uniqueCountries: document.getElementById('unique-countries'),
         logList: document.getElementById('log-list'),
-        connectionStatus: document.getElementById('connection-status')
+        topStatus: document.getElementById('top-status'),
+        topClock: document.getElementById('top-clock'),
+        topUptime: document.getElementById('top-uptime'),
+        ledRow: document.getElementById('led-row'),
+        spark: document.getElementById('spark'),
+        mapSvg: document.getElementById('map-svg')
     };
 
-    // Map
-    const bounds = L.latLngBounds(L.latLng(-60, -170), L.latLng(75, 170));
-    const map = L.map('map', {
-        center: [20, 0], zoom: 2, minZoom: 2, maxZoom: 10,
-        maxBounds: bounds, maxBoundsViscosity: 1.0,
-        zoomControl: false, attributionControl: false
-    });
-    map.setMaxBounds(bounds);
-    map.on('drag', function() { map.panInsideBounds(bounds, { animate: false }); });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 10, noWrap: true }).addTo(map);
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
-    L.marker(CONFIG.target.coords, {
-        icon: L.divIcon({ className: 'target-marker', iconSize: [20, 20], iconAnchor: [10, 10] })
-    }).addTo(map).bindPopup('<strong>' + CONFIG.target.name + '</strong><br>' + CONFIG.target.location);
+    const bootTime = Date.now();
 
-    // Charts
-    Chart.defaults.color = '#606070';
-    Chart.defaults.font.family = 'Outfit, sans-serif';
+    /* ---------- Clock + uptime ---------- */
+
+    function tickClock() {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        if (dom.topClock) dom.topClock.textContent = hh + ':' + mm + ':' + ss;
+
+        const elapsed = Math.floor((Date.now() - bootTime) / 1000);
+        const eh = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+        const em = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+        const es = String(elapsed % 60).padStart(2, '0');
+        if (dom.topUptime) dom.topUptime.textContent = 'UPTIME_' + eh + ':' + em + ':' + es;
+    }
+
+    /* ---------- Diagnostic LED row ---------- */
+
+    function initLEDs() {
+        if (!dom.ledRow) return;
+        for (let i = 0; i < CONFIG.ui.ledCount; i++) {
+            const led = document.createElement('span');
+            led.className = 'led';
+            dom.ledRow.appendChild(led);
+        }
+    }
+
+    function flickerLED() {
+        if (!dom.ledRow) return;
+        const leds = dom.ledRow.querySelectorAll('.led');
+        if (!leds.length) return;
+        const i = Math.floor(Math.random() * leds.length);
+        leds[i].classList.add('on');
+        setTimeout(function() { leds[i].classList.remove('on'); }, 140 + Math.random() * 120);
+    }
+
+    /* ---------- Sparkline ---------- */
+
+    function tickSparkShift() {
+        state.spark.shift();
+        state.spark.push(0);
+        renderSpark();
+    }
+
+    function recordSparkHit() {
+        state.spark[state.spark.length - 1] += 1;
+    }
+
+    function renderSpark() {
+        if (!dom.spark) return;
+        const ctx = dom.spark.getContext('2d');
+        const w = dom.spark.width, h = dom.spark.height;
+        ctx.clearRect(0, 0, w, h);
+        const max = Math.max(1, Math.max.apply(null, state.spark));
+        const n = state.spark.length;
+        const barW = w / n;
+        ctx.fillStyle = '#e5231b';
+        for (let i = 0; i < n; i++) {
+            const v = state.spark[i];
+            if (v <= 0) continue;
+            const bh = Math.max(1, Math.round((v / max) * h));
+            ctx.fillRect(Math.floor(i * barW), h - bh, Math.max(1, Math.floor(barW - 0.5)), bh);
+        }
+    }
+
+    /* ---------- d3 SVG world map ---------- */
+
+    async function initMap() {
+        if (!dom.mapSvg || typeof d3 === 'undefined' || typeof topojson === 'undefined') return;
+        const rect = dom.mapSvg.getBoundingClientRect();
+        const width = rect.width || 800;
+        const height = rect.height || 400;
+
+        state.svg = d3.select(dom.mapSvg)
+            .attr('viewBox', '0 0 ' + width + ' ' + height);
+
+        try {
+            const world = await d3.json(CONFIG.worldDataUrl);
+            const land = topojson.feature(world, world.objects.countries);
+
+            state.projection = d3.geoEquirectangular()
+                .fitSize([width, height], land);
+            state.pathGen = d3.geoPath(state.projection);
+
+            // Graticule
+            const graticule = d3.geoGraticule().step([30, 30]);
+            state.svg.append('path')
+                .datum(graticule)
+                .attr('class', 'graticule')
+                .attr('d', state.pathGen);
+
+            // Countries
+            state.svg.append('g')
+                .attr('class', 'countries')
+                .selectAll('path')
+                .data(land.features)
+                .enter().append('path')
+                .attr('class', 'country')
+                .attr('d', state.pathGen);
+
+            // Layers for markers + arcs + projectiles
+            state.svg.append('g').attr('class', 'arcs');
+            state.svg.append('g').attr('class', 'projectiles');
+            state.svg.append('g').attr('class', 'targets');
+
+            // Target marker (Buffalo)
+            const [tx, ty] = state.projection([CONFIG.target.coords[1], CONFIG.target.coords[0]]);
+            const tg = state.svg.select('.targets');
+            tg.append('circle').attr('class', 'target-ring').attr('cx', tx).attr('cy', ty).attr('r', 4);
+            tg.append('circle').attr('class', 'target-dot').attr('cx', tx).attr('cy', ty).attr('r', 3.5);
+        } catch (e) {
+            console.error('Map init error:', e);
+        }
+    }
+
+    function isValidCoords(lat, lon) {
+        return typeof lat === 'number' && typeof lon === 'number'
+            && !isNaN(lat) && !isNaN(lon)
+            && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+    }
+
+    function spawnAttack(attack) {
+        if (!state.projection || !isValidCoords(attack.lat, attack.lon)) return;
+
+        const [ox, oy] = state.projection([attack.lon, attack.lat]);
+        const [tx, ty] = state.projection([CONFIG.target.coords[1], CONFIG.target.coords[0]]);
+
+        // Curved arc path
+        const mx = (ox + tx) / 2;
+        const my = (oy + ty) / 2 - Math.min(60, Math.hypot(tx - ox, ty - oy) * 0.25);
+        const arcD = 'M' + ox + ',' + oy + ' Q' + mx + ',' + my + ' ' + tx + ',' + ty;
+
+        const arc = state.svg.select('.arcs').append('path')
+            .attr('class', 'attack-arc')
+            .attr('d', arcD);
+
+        // Fade arc
+        arc.transition()
+            .delay(1200)
+            .duration(CONFIG.animation.arcFadeTime)
+            .style('stroke-opacity', 0)
+            .remove();
+
+        // Projectile traveling along the arc
+        const pathNode = arc.node();
+        const totalLen = pathNode.getTotalLength();
+        const dot = state.svg.select('.projectiles').append('circle')
+            .attr('class', 'attack-dot')
+            .attr('r', 2.5);
+
+        const duration = CONFIG.animation.duration.min + Math.random() * (CONFIG.animation.duration.max - CONFIG.animation.duration.min);
+        const startT = performance.now();
+
+        function step(now) {
+            const t = Math.min((now - startT) / duration, 1);
+            const eased = 1 - Math.pow(1 - t, 3);
+            const point = pathNode.getPointAtLength(totalLen * eased);
+            dot.attr('cx', point.x).attr('cy', point.y);
+            if (t < 1) requestAnimationFrame(step);
+            else dot.remove();
+        }
+        requestAnimationFrame(step);
+    }
+
+    /* ---------- Charts ---------- */
+
+    Chart.defaults.color = '#707070';
+    Chart.defaults.font.family = 'IBM Plex Mono, ui-monospace, monospace';
     const chartStats = { users: {}, countries: {} };
 
     const userChart = new Chart(document.getElementById('userChart'), {
         type: 'bar',
-        data: { labels: [], datasets: [{ data: [], backgroundColor: '#ff0080', borderRadius: 2, barThickness: 16 }] },
+        data: { labels: [], datasets: [{ data: [], backgroundColor: '#e5231b', borderRadius: 0, barThickness: 14 }] },
         options: {
             indexAxis: 'y', responsive: true, maintainAspectRatio: false,
             plugins: { legend: { display: false } },
-            scales: { x: { display: false }, y: { grid: { display: false }, ticks: { color: '#fff', font: { family: 'Space Mono', size: 11 } } } }
+            scales: { x: { display: false }, y: { grid: { display: false }, ticks: { color: '#0a0a0a', font: { family: 'IBM Plex Mono', size: 10 } } } }
         }
     });
 
     const countryChart = new Chart(document.getElementById('countryChart'), {
         type: 'doughnut',
-        data: { labels: [], datasets: [{ data: [], backgroundColor: ['#ff6b35', '#00d4ff', '#ff0080', '#00ff88', '#8b5cf6'], borderWidth: 0 }] },
+        data: { labels: [], datasets: [{ data: [], backgroundColor: ['#e5231b', '#0a0a0a', '#707070', '#a8a8a8', '#d4d4d4'], borderWidth: 1, borderColor: '#f5f2eb' }] },
         options: {
-            responsive: true, maintainAspectRatio: false, cutout: '60%',
-            plugins: { legend: { position: 'right', labels: { boxWidth: 12, padding: 12, font: { family: 'Space Mono', size: 10 }, color: '#a0a0b0' } } }
+            responsive: true, maintainAspectRatio: false, cutout: '62%',
+            plugins: { legend: { position: 'right', labels: { boxWidth: 10, padding: 10, font: { family: 'IBM Plex Mono', size: 10 }, color: '#0a0a0a' } } }
         }
     });
+
+    function updateCharts() {
+        var sortedUsers = Object.entries(chartStats.users).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 5);
+        userChart.data.labels = sortedUsers.map(function(x) { return x[0]; });
+        userChart.data.datasets[0].data = sortedUsers.map(function(x) { return x[1]; });
+        userChart.update('none');
+
+        var sortedCountries = Object.entries(chartStats.countries).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 5);
+        countryChart.data.labels = sortedCountries.map(function(x) { return x[0]; });
+        countryChart.data.datasets[0].data = sortedCountries.map(function(x) { return x[1]; });
+        countryChart.update('none');
+    }
+
+    /* ---------- Log feed ---------- */
 
     function formatSecondsAgo(seconds) {
         if (seconds < 0) seconds = 0;
@@ -70,12 +249,39 @@
             item.secondsAgo++;
             if (item.element) {
                 var agoEl = item.element.querySelector('.log-ago');
-                if (agoEl) agoEl.textContent = formatSecondsAgo(item.secondsAgo);
+                if (agoEl) agoEl.textContent = formatSecondsAgo(item.secondsAgo).toUpperCase();
             }
         });
-        // Clean up entries over 6 hours
         state.attacksInLog = state.attacksInLog.filter(function(item) { return item.secondsAgo < 21600; });
     }
+
+    function addLogItem(attack, animate) {
+        var empty = dom.logList.querySelector('.log-empty');
+        if (empty) empty.remove();
+
+        var item = document.createElement('div');
+        item.className = 'log-item' + (animate ? ' animated' : '');
+
+        var time = new Date(attack.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        var secondsAgo = attack.seconds_ago || 0;
+
+        item.innerHTML =
+            '<span class="log-ip">' + escapeHtml(attack.ip) + '</span>' +
+            '<div class="log-mid">' +
+                '<span class="log-user">' + escapeHtml(attack.user).toUpperCase() + '</span>' +
+                '<span class="log-country">' + escapeHtml(attack.country || 'UNKNOWN') + '</span>' +
+            '</div>' +
+            '<div class="log-right">' +
+                '<span class="log-time">' + time + '</span>' +
+                '<span class="log-ago">' + formatSecondsAgo(secondsAgo).toUpperCase() + '</span>' +
+            '</div>';
+
+        dom.logList.insertBefore(item, dom.logList.firstChild);
+        state.attacksInLog.push({ element: item, secondsAgo: secondsAgo });
+        while (dom.logList.children.length > CONFIG.ui.maxLogItems) dom.logList.removeChild(dom.logList.lastChild);
+    }
+
+    /* ---------- Stats + polling ---------- */
 
     async function fetchStats() {
         try {
@@ -110,80 +316,20 @@
             chartStats.users[attack.user] = (chartStats.users[attack.user] || 0) + 1;
             chartStats.countries[attack.country || 'Unknown'] = (chartStats.countries[attack.country || 'Unknown'] || 0) + 1;
             addLogItem(attack, !isHistorical);
-            if (!isHistorical && isValidCoords(attack.lat, attack.lon)) spawnProjectile(attack);
+            if (!isHistorical) {
+                spawnAttack(attack);
+                flickerLED();
+                recordSparkHit();
+            }
         });
+        renderSpark();
         updateCharts();
     }
 
-    function isValidCoords(lat, lon) {
-        return typeof lat === 'number' && typeof lon === 'number' && !isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
-    }
-
-    function updateCharts() {
-        var sortedUsers = Object.entries(chartStats.users).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 5);
-        userChart.data.labels = sortedUsers.map(function(x) { return x[0]; });
-        userChart.data.datasets[0].data = sortedUsers.map(function(x) { return x[1]; });
-        userChart.update('none');
-
-        var sortedCountries = Object.entries(chartStats.countries).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 5);
-        countryChart.data.labels = sortedCountries.map(function(x) { return x[0]; });
-        countryChart.data.datasets[0].data = sortedCountries.map(function(x) { return x[1]; });
-        countryChart.update('none');
-    }
-
     function setConnectionStatus(connected) {
-        dom.connectionStatus.className = 'connection-status' + (connected ? '' : ' error');
-        dom.connectionStatus.innerHTML = connected
-            ? '<span class="status-dot"></span><span>Connected — Live Data</span>'
-            : '<span class="status-dot"></span><span>Connection Error — Retrying...</span>';
-    }
-
-    function addLogItem(attack, animate) {
-        var empty = dom.logList.querySelector('.log-empty');
-        if (empty) empty.remove();
-
-        var item = document.createElement('div');
-        item.className = 'log-item' + (animate ? ' animated' : '');
-
-        var time = new Date(attack.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        var secondsAgo = attack.seconds_ago || 0;
-
-        item.innerHTML =
-            '<div class="log-item-left">' +
-                '<span class="log-ip">' + escapeHtml(attack.ip) + '</span>' +
-                '<span class="log-user">user: ' + escapeHtml(attack.user) + '</span>' +
-            '</div>' +
-            '<div class="log-item-right">' +
-                '<span class="log-country">' + escapeHtml(attack.country || 'Unknown') + '</span>' +
-                '<span class="log-time">' + time + '</span>' +
-                '<span class="log-ago">' + formatSecondsAgo(secondsAgo) + '</span>' +
-            '</div>';
-
-        dom.logList.insertBefore(item, dom.logList.firstChild);
-        state.attacksInLog.push({ element: item, secondsAgo: secondsAgo });
-        while (dom.logList.children.length > CONFIG.ui.maxLogItems) dom.logList.removeChild(dom.logList.lastChild);
-    }
-
-    function spawnProjectile(attack) {
-        var origin = [attack.lat, attack.lon];
-        var target = CONFIG.target.coords;
-
-        var trail = L.polyline([origin, target], { color: '#ff0080', weight: 2, opacity: 0.6 }).addTo(map);
-        state.trails.push(trail);
-        setTimeout(function() { if (trail._path) { trail._path.style.transition = 'opacity 60s linear'; trail._path.style.opacity = '0'; } }, 100);
-        setTimeout(function() { if (map.hasLayer(trail)) map.removeLayer(trail); var idx = state.trails.indexOf(trail); if (idx > -1) state.trails.splice(idx, 1); }, CONFIG.animation.trailFadeTime + 1000);
-
-        var marker = L.marker(origin, { icon: L.divIcon({ className: 'attack-projectile', iconSize: [10, 10], iconAnchor: [5, 5] }), interactive: false }).addTo(map);
-        var duration = CONFIG.animation.duration.min + Math.random() * (CONFIG.animation.duration.max - CONFIG.animation.duration.min);
-        var start = performance.now();
-
-        function animate(now) {
-            var progress = Math.min((now - start) / duration, 1);
-            var eased = 1 - Math.pow(1 - progress, 3);
-            marker.setLatLng([origin[0] + (target[0] - origin[0]) * eased, origin[1] + (target[1] - origin[1]) * eased]);
-            if (progress < 1) requestAnimationFrame(animate); else map.removeLayer(marker);
-        }
-        requestAnimationFrame(animate);
+        if (!dom.topStatus) return;
+        dom.topStatus.className = 'strip-cell status ' + (connected ? 'live' : 'err');
+        dom.topStatus.innerHTML = '<span class="dot"></span>' + (connected ? 'LIVE' : 'ERR_RETRY');
     }
 
     function escapeHtml(str) {
@@ -193,9 +339,17 @@
         return div.innerHTML;
     }
 
+    /* ---------- Bootstrap ---------- */
+
     document.addEventListener('DOMContentLoaded', function() {
+        initLEDs();
+        renderSpark();
+        tickClock();
+        initMap();
         fetchStats();
         poll();
         setInterval(updateAgoDisplays, 1000);
+        setInterval(tickClock, 1000);
+        setInterval(tickSparkShift, 1000);
     });
 })();
