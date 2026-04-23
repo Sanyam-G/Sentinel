@@ -1,53 +1,70 @@
 # Sentinel
 
-Sentinel is a security monitoring dashboard that visualizes SSH authentication attempts in real-time. It connects to a remote server via SSH, tails the system logs, and geolocates incoming IP addresses to display attack vectors on a live map.
+Real-time SSH intrusion dashboard. Streams `journalctl` over an SSH tunnel from a remote server, parses failed login attempts, geolocates attacker IPs against the MaxMind GeoLite2 database, and renders them on a custom d3 SVG world map with live telemetry.
+
+Live at [sentinel.sanyamgarg.com](https://sentinel.sanyamgarg.com).
+
+## Design
+
+Interface is built to a Teenage Engineering + Nothing aesthetic: warm cream background, single red accent, IBM Plex Mono throughout, VT323 dot-matrix numerals for metric values. No glows, no rounded corners, no gradients.
+
+Key UI elements:
+- **Custom SVG world map** — d3-geo + `johan/world.geo.json`, equirectangular projection. All countries render dimmed on load; a country "activates" the first time it produces an attack in the current session.
+- **Ballistic attack lines** — straight 1px red lines drawn from origin to target in sync with a sharp projectile. Crosshair tick marks at launch, crosshair + filled-square flash at impact.
+- **Diagnostic LED row** — 14 squares in the top strip, random one flickers red on every attack.
+- **Live sparkline** — 60-second rolling attack-rate mini-histogram next to `LAST_60S`.
+- **Numbered TE-style blocks** (01 – 07), each with its section label in red.
 
 ## Architecture
 
-1. **Log Collection**: The application establishes a secure SSH tunnel to the target server and streams `journalctl` (systemd) logs.
-2. **Parsing**: A Python backend parses the stream for failed login attempts and invalid user errors.
-3. **Enrichment**: IP addresses are cross-referenced with the MaxMind GeoLite2 database to determine the origin city and country.
-4. **Storage**: Events are stored in a local SQLite database with a 1-hour retention policy.
-5. **Visualization**: A FastAPI endpoint serves the data to a frontend dashboard built with Leaflet.js.
+1. **Log collection** — container SSHes into the target server and streams `journalctl -u ssh -f`. A key is mounted read-only at `/app/ssh_key`.
+2. **Parsing** — Python regex extracts `(invalid user | failed password)` events and pulls the attacker IP and attempted username.
+3. **Enrichment** — IPs are geolocated against MaxMind's GeoLite2 City database for country, city, lat/lon.
+4. **Storage** — SQLite with a 1-hour retention window; a background thread prunes older rows every 5 minutes.
+5. **API** — FastAPI exposes `/api/poll` (incremental attacks since `last_id`) and `/api/stats` (totals, unique IPs, unique countries, last-60-second rate, container uptime).
+6. **Frontend** — polls every 1.5 seconds. Live attacks animate on the map; historical backfill loads on page open (last hour of data) without animation.
 
-## Prerequisites
+## Stack
 
-- Docker and Docker Compose
-- SSH access to the target server (key-based authentication)
-- MaxMind GeoLite2 City database (`.mmdb`)
+Python · FastAPI · SQLite · d3.js · topojson · Chart.js · Docker · MaxMind GeoLite2
 
-## Configuration
+## Run locally
 
-1. **Database Setup**
-   Place your `GeoLite2-City.mmdb` file inside the `data/` directory.
-
-2. **Environment Variables**
-   Create a `.env` file in the root directory:
-   ```bash
-   TARGET_HOST=192.0.2.1
-   TARGET_USER=root
-   ```
-
-3. **SSH Key**
-   Ensure the `docker-compose.yml` volume mapping points to a valid SSH private key on your host machine that has access to the target server.
-
-## Usage
-
-Build and run the container:
+Prerequisites: Docker, SSH key auth to the target server, `GeoLite2-City.mmdb`.
 
 ```bash
-docker-compose up -d --build
+# Drop GeoLite2-City.mmdb into data/
+cp GeoLite2-City.mmdb data/
+
+# Env
+cat > .env <<EOF
+TARGET_HOST=your.target.host
+TARGET_USER=root
+EOF
+
+# Adjust docker-compose.yml so the ssh_key volume points at a valid private key
+# (default assumes ~/.ssh/id_rsa), then:
+docker compose up -d --build
 ```
 
-The dashboard will be available at `http://localhost:8000`.
+Dashboard at `http://localhost:8000`.
 
-## Project Structure
+## Deploy flow
 
-- `main.py`: Backend logic for log streaming, parsing, and API endpoints.
-- `static/`: Frontend assets (HTML, CSS, JS).
-- `data/`: Volume mount for the SQLite database and GeoIP binary.
+Production runs on ajstor behind a Cloudflare Tunnel. Frontend-only changes are `rsync -avz static/ ajstor:/home/sammy/data/sentinel/static/` (the container mounts `./static` as a volume, so new files are served live). Backend (`main.py`) changes require `docker compose up -d --build`.
+
+Static asset URLs in `index.html` are versioned (`style.css?v=…`) to bust Cloudflare's edge cache on deploy.
+
+## Files
+
+- `main.py` — log streaming, SQLite layer, FastAPI routes, cleanup loop
+- `static/index.html` — dashboard markup
+- `static/style.css` — full UI
+- `static/script.js` — d3 map, live polling, attack animations, LED + sparkline
+- `data/` — SQLite DB + GeoLite2 mmdb (volume-mounted)
+- `docker-compose.yml` — container, env, volume mounts
+- `Dockerfile` — Python 3.11 slim + openssh-client
 
 ## License
 
 MIT
-
