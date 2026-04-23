@@ -44,12 +44,36 @@ body::before {
     top: 0;
     z-index: 50;
     display: grid;
-    grid-template-columns: auto 1fr auto auto;
+    grid-template-columns: auto auto 1fr auto auto auto;
     border-bottom: 1px solid var(--border);
     background: var(--bg);
     font-size: 0.7rem;
     letter-spacing: 0.12em;
     text-transform: uppercase;
+    min-height: 56px;
+}
+
+.strip-cell.stacked {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 2px;
+    padding: 8px 16px;
+}
+
+.mono-tiny {
+    font-size: 0.55rem;
+    color: var(--muted);
+    letter-spacing: 0.22em;
+}
+
+.mono-big {
+    font-family: var(--dots);
+    font-size: 1.3rem;
+    color: var(--fg);
+    letter-spacing: 0.04em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
 }
 
 .strip-cell {
@@ -68,6 +92,8 @@ body::before {
     color: var(--accent);
     font-weight: 700;
     letter-spacing: 0.25em;
+    font-size: 0.95rem;
+    padding: 0 20px;
 }
 
 .strip-cell.clock { justify-content: flex-end; font-variant-numeric: tabular-nums; }
@@ -121,7 +147,6 @@ body::before {
     gap: 0;
     position: relative;
     z-index: 1;
-    min-height: calc(100vh - 76px);
 }
 
 .col-left {
@@ -130,10 +155,6 @@ body::before {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    overflow-y: auto;
-    max-height: calc(100vh - 76px);
-    position: sticky;
-    top: 36px;
 }
 
 .col-main {
@@ -297,29 +318,31 @@ body::before {
 
 /* Portfolio button */
 .port-btn {
-    display: flex;
+    display: flex !important;
     justify-content: space-between;
     align-items: center;
-    padding: 14px 16px;
-    border: 1px solid var(--accent);
-    background: var(--bg);
-    color: var(--accent);
+    gap: 12px;
+    padding: 0 18px !important;
+    background: var(--accent);
+    color: var(--bg) !important;
     text-decoration: none;
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: 0.7rem;
+    font-weight: 700;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    transition: background 100ms, color 100ms;
+    border-left: 1px solid var(--accent);
+    transition: background 120ms, color 120ms;
 }
 
 .port-btn:hover {
-    background: var(--accent);
-    color: var(--bg);
+    background: var(--accent-strong);
+    color: var(--bg) !important;
 }
 
 .port-btn .arrow {
     font-family: var(--mono);
-    transition: transform 100ms;
+    transition: transform 120ms;
+    font-size: 0.9rem;
 }
 
 .port-btn:hover .arrow { transform: translateX(4px); }
@@ -329,7 +352,7 @@ body::before {
     display: flex;
     flex-direction: column;
     flex: 1;
-    min-height: 420px;
+    min-height: 560px;
 }
 
 .map-wrap {
@@ -337,13 +360,13 @@ body::before {
     position: relative;
     border: 1px solid var(--border);
     overflow: hidden;
-    min-height: 380px;
+    min-height: 520px;
 }
 
 #map-svg {
     width: 100%;
     height: 100%;
-    min-height: 380px;
+    min-height: 520px;
     background: var(--bg-2);
     display: block;
 }
@@ -351,8 +374,17 @@ body::before {
 #map-svg .country {
     fill: var(--bg);
     stroke: var(--fg);
-    stroke-width: 0.5;
-    stroke-opacity: 0.55;
+    stroke-width: 0.6;
+    stroke-opacity: 0.7;
+}
+
+#map-svg .country.fresh {
+    animation: country-flash 900ms ease-out;
+}
+
+@keyframes country-flash {
+    0% { fill: var(--accent); }
+    100% { fill: var(--bg); }
 }
 
 #map-svg .graticule {
@@ -372,29 +404,40 @@ body::before {
 #map-svg .target-ring {
     fill: none;
     stroke: var(--accent);
-    stroke-width: 1;
+    stroke-width: 1.2;
     animation: ring-pulse 1.8s ease-out infinite;
-    transform-origin: center;
-    transform-box: fill-box;
 }
 
 @keyframes ring-pulse {
-    0% { r: 4; opacity: 0.9; }
-    100% { r: 14; opacity: 0; }
+    0% { r: 5; opacity: 1; }
+    100% { r: 22; opacity: 0; }
+}
+
+#map-svg .impact {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    opacity: 0.9;
 }
 
 #map-svg .attack-arc {
     fill: none;
     stroke: var(--accent);
-    stroke-width: 0.8;
-    stroke-opacity: 0.65;
-    stroke-dasharray: 2 3;
+    stroke-width: 1.6;
+    stroke-opacity: 0.85;
+    stroke-dasharray: 4 3;
 }
 
 #map-svg .attack-dot {
     fill: var(--accent);
     stroke: var(--bg);
-    stroke-width: 0.5;
+    stroke-width: 0.8;
+    filter: drop-shadow(0 0 3px rgba(229, 35, 27, 0.8));
+}
+
+#map-svg .attack-halo {
+    fill: var(--accent);
+    opacity: 0.25;
 }
 
 .legend {
@@ -432,11 +475,17 @@ body::before {
 .map-overlay-tr { top: 8px; right: 8px; }
 .map-overlay-bl { bottom: 8px; left: 8px; }
 
-/* Bottom row: charts + log */
+/* Bottom row: full-width charts + log */
 .bottom-row {
     display: grid;
-    grid-template-columns: 1fr 1fr 1.3fr;
+    grid-template-columns: 1fr 1fr 1.5fr;
     gap: 20px;
+    padding: 0 20px 20px 20px;
+    position: relative;
+    z-index: 1;
+    border-top: 1px solid var(--border);
+    padding-top: 20px;
+    margin-top: 0;
 }
 
 .chart-wrap {

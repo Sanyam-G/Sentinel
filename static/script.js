@@ -6,7 +6,42 @@
         polling: { interval: 1500, endpoint: '/api/poll', statsEndpoint: '/api/stats' },
         animation: { duration: { min: 1800, max: 2800 }, arcFadeTime: 60000 },
         ui: { maxLogItems: 100, ledCount: 14, sparkSeconds: 60 },
-        worldDataUrl: 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
+        worldDataUrl: 'https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json'
+    };
+
+    // GeoIP country name → GeoJSON country name aliases
+    const COUNTRY_ALIASES = {
+        'United States': 'United States of America',
+        'USA': 'United States of America',
+        'Russia': 'Russia',
+        'Korea, Republic of': 'South Korea',
+        'Republic of Korea': 'South Korea',
+        'Korea, Democratic Peoples Republic of': 'North Korea',
+        'Czech Republic': 'Czech Republic',
+        'Czechia': 'Czech Republic',
+        'Burma': 'Myanmar',
+        "Cote d'Ivoire": 'Ivory Coast',
+        'Côte d’Ivoire': 'Ivory Coast',
+        'Viet Nam': 'Vietnam',
+        'Iran, Islamic Republic of': 'Iran',
+        'Syrian Arab Republic': 'Syria',
+        'Taiwan, Province of China': 'Taiwan',
+        'Venezuela, Bolivarian Republic of': 'Venezuela',
+        'Bolivia, Plurinational State of': 'Bolivia',
+        'Moldova, Republic of': 'Moldova',
+        'Tanzania, United Republic of': 'United Republic of Tanzania',
+        'Macedonia': 'Macedonia',
+        'North Macedonia': 'Macedonia',
+        'Eswatini': 'Swaziland',
+        'Cabo Verde': 'Cape Verde',
+        'Congo': 'Republic of the Congo',
+        'Congo, Democratic Republic of the': 'Democratic Republic of the Congo',
+        'Lao Peoples Democratic Republic': 'Laos',
+        'Brunei Darussalam': 'Brunei',
+        'Palestine, State of': 'Palestine',
+        'Hong Kong': 'Hong Kong S.A.R.',
+        'Macao': 'Macao S.A.R',
+        'Macau': 'Macao S.A.R'
     };
 
     const state = {
@@ -15,7 +50,9 @@
         spark: new Array(CONFIG.ui.sparkSeconds).fill(0),
         svg: null,
         projection: null,
-        pathGen: null
+        pathGen: null,
+        countryIndex: new Map(),
+        drawnCountries: new Set()
     };
 
     const dom = {
@@ -47,7 +84,7 @@
         const eh = String(Math.floor(elapsed / 3600)).padStart(2, '0');
         const em = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
         const es = String(elapsed % 60).padStart(2, '0');
-        if (dom.topUptime) dom.topUptime.textContent = 'UPTIME_' + eh + ':' + em + ':' + es;
+        if (dom.topUptime) dom.topUptime.textContent = eh + ':' + em + ':' + es;
     }
 
     /* ---------- Diagnostic LED row ---------- */
@@ -102,7 +139,7 @@
     /* ---------- d3 SVG world map ---------- */
 
     async function initMap() {
-        if (!dom.mapSvg || typeof d3 === 'undefined' || typeof topojson === 'undefined') return;
+        if (!dom.mapSvg || typeof d3 === 'undefined') return;
         const rect = dom.mapSvg.getBoundingClientRect();
         const width = rect.width || 800;
         const height = rect.height || 400;
@@ -111,30 +148,27 @@
             .attr('viewBox', '0 0 ' + width + ' ' + height);
 
         try {
-            const world = await d3.json(CONFIG.worldDataUrl);
-            const land = topojson.feature(world, world.objects.countries);
+            const geo = await d3.json(CONFIG.worldDataUrl);
 
             state.projection = d3.geoEquirectangular()
-                .fitSize([width, height], land);
+                .fitSize([width, height], geo);
             state.pathGen = d3.geoPath(state.projection);
 
-            // Graticule
+            // Index features by name for fast lookup
+            for (const f of geo.features) {
+                const name = f.properties && f.properties.name;
+                if (name) state.countryIndex.set(name, f);
+            }
+
+            // Graticule (thin dashed lat/lon grid, drawn first)
             const graticule = d3.geoGraticule().step([30, 30]);
             state.svg.append('path')
                 .datum(graticule)
                 .attr('class', 'graticule')
                 .attr('d', state.pathGen);
 
-            // Countries
-            state.svg.append('g')
-                .attr('class', 'countries')
-                .selectAll('path')
-                .data(land.features)
-                .enter().append('path')
-                .attr('class', 'country')
-                .attr('d', state.pathGen);
-
-            // Layers for markers + arcs + projectiles
+            // Empty layers (countries are added live as attacks arrive)
+            state.svg.append('g').attr('class', 'countries');
             state.svg.append('g').attr('class', 'arcs');
             state.svg.append('g').attr('class', 'projectiles');
             state.svg.append('g').attr('class', 'targets');
@@ -142,10 +176,43 @@
             // Target marker (Buffalo)
             const [tx, ty] = state.projection([CONFIG.target.coords[1], CONFIG.target.coords[0]]);
             const tg = state.svg.select('.targets');
-            tg.append('circle').attr('class', 'target-ring').attr('cx', tx).attr('cy', ty).attr('r', 4);
-            tg.append('circle').attr('class', 'target-dot').attr('cx', tx).attr('cy', ty).attr('r', 3.5);
+            tg.append('circle').attr('class', 'target-ring').attr('cx', tx).attr('cy', ty).attr('r', 5);
+            tg.append('circle').attr('class', 'target-dot').attr('cx', tx).attr('cy', ty).attr('r', 4);
         } catch (e) {
             console.error('Map init error:', e);
+        }
+    }
+
+    function resolveCountryName(geoipName) {
+        if (!geoipName) return null;
+        if (COUNTRY_ALIASES[geoipName]) return COUNTRY_ALIASES[geoipName];
+        return geoipName;
+    }
+
+    function drawCountryIfNeeded(countryName, animate) {
+        if (!state.svg || !countryName) return;
+        const resolved = resolveCountryName(countryName);
+        if (state.drawnCountries.has(resolved)) return;
+
+        const feature = state.countryIndex.get(resolved);
+        if (!feature) {
+            if (!state.drawnCountries.has('__unmatched__' + resolved)) {
+                state.drawnCountries.add('__unmatched__' + resolved);
+                console.log('unmatched country:', countryName, '->', resolved);
+            }
+            return;
+        }
+
+        state.drawnCountries.add(resolved);
+
+        const path = state.svg.select('.countries').append('path')
+            .datum(feature)
+            .attr('class', 'country' + (animate ? ' fresh' : ''))
+            .attr('d', state.pathGen);
+
+        if (animate) {
+            path.style('opacity', 0)
+                .transition().duration(500).style('opacity', 1);
         }
     }
 
@@ -158,13 +225,13 @@
     function spawnAttack(attack) {
         if (!state.projection || !isValidCoords(attack.lat, attack.lon)) return;
 
-        const [ox, oy] = state.projection([attack.lon, attack.lat]);
+        const [originX, originY] = state.projection([attack.lon, attack.lat]);
         const [tx, ty] = state.projection([CONFIG.target.coords[1], CONFIG.target.coords[0]]);
 
-        // Curved arc path
-        const mx = (ox + tx) / 2;
-        const my = (oy + ty) / 2 - Math.min(60, Math.hypot(tx - ox, ty - oy) * 0.25);
-        const arcD = 'M' + ox + ',' + oy + ' Q' + mx + ',' + my + ' ' + tx + ',' + ty;
+        // Curved arc path (higher arc for drama)
+        const mx = (originX + tx) / 2;
+        const my = (originY + ty) / 2 - Math.min(90, Math.hypot(tx - originX, ty - originY) * 0.32);
+        const arcD = 'M' + originX + ',' + originY + ' Q' + mx + ',' + my + ' ' + tx + ',' + ty;
 
         const arc = state.svg.select('.arcs').append('path')
             .attr('class', 'attack-arc')
@@ -172,17 +239,30 @@
 
         // Fade arc
         arc.transition()
-            .delay(1200)
+            .delay(1500)
             .duration(CONFIG.animation.arcFadeTime)
             .style('stroke-opacity', 0)
             .remove();
 
-        // Projectile traveling along the arc
+        // Origin pulse
+        const originPulse = state.svg.select('.projectiles').append('circle')
+            .attr('class', 'impact')
+            .attr('cx', originX).attr('cy', originY).attr('r', 2);
+        originPulse.transition().duration(600)
+            .attr('r', 10).style('opacity', 0)
+            .on('end', function() { originPulse.remove(); });
+
+        // Projectile + halo
         const pathNode = arc.node();
         const totalLen = pathNode.getTotalLength();
+
+        const halo = state.svg.select('.projectiles').append('circle')
+            .attr('class', 'attack-halo')
+            .attr('r', 8);
+
         const dot = state.svg.select('.projectiles').append('circle')
             .attr('class', 'attack-dot')
-            .attr('r', 2.5);
+            .attr('r', 3.5);
 
         const duration = CONFIG.animation.duration.min + Math.random() * (CONFIG.animation.duration.max - CONFIG.animation.duration.min);
         const startT = performance.now();
@@ -192,8 +272,19 @@
             const eased = 1 - Math.pow(1 - t, 3);
             const point = pathNode.getPointAtLength(totalLen * eased);
             dot.attr('cx', point.x).attr('cy', point.y);
+            halo.attr('cx', point.x).attr('cy', point.y);
             if (t < 1) requestAnimationFrame(step);
-            else dot.remove();
+            else {
+                dot.remove();
+                halo.remove();
+                // Impact flash at target
+                const impact = state.svg.select('.projectiles').append('circle')
+                    .attr('class', 'impact')
+                    .attr('cx', tx).attr('cy', ty).attr('r', 3);
+                impact.transition().duration(500)
+                    .attr('r', 24).style('opacity', 0)
+                    .on('end', function() { impact.remove(); });
+            }
         }
         requestAnimationFrame(step);
     }
@@ -316,6 +407,8 @@
             chartStats.users[attack.user] = (chartStats.users[attack.user] || 0) + 1;
             chartStats.countries[attack.country || 'Unknown'] = (chartStats.countries[attack.country || 'Unknown'] || 0) + 1;
             addLogItem(attack, !isHistorical);
+            // Draw the country on the map if this is its first attack this session
+            drawCountryIfNeeded(attack.country, !isHistorical);
             if (!isHistorical) {
                 spawnAttack(attack);
                 flickerLED();

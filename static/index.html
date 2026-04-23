@@ -8,16 +8,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=VT323&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260423a" />
+    <link rel="stylesheet" href="style.css?v=20260423c" />
 </head>
 <body>
 
 <header class="top-strip">
     <div class="strip-cell brand">SENTINEL</div>
-    <div class="strip-cell" id="top-uptime">UPTIME_00:00:00</div>
+    <div class="strip-cell stacked">
+        <span class="mono-tiny">UPTIME</span>
+        <span class="mono-big" id="top-uptime">00:00:00</span>
+    </div>
     <div class="strip-cell led-cell" id="led-row"></div>
-    <div class="strip-cell clock" id="top-clock">--:--:--</div>
+    <div class="strip-cell stacked">
+        <span class="mono-tiny">LOCAL_TIME</span>
+        <span class="mono-big" id="top-clock">--:--:--</span>
+    </div>
     <div class="strip-cell status" id="top-status"><span class="dot"></span>CONNECTING</div>
+    <a href="https://sanyamgarg.com" target="_blank" rel="noopener noreferrer" class="strip-cell port-btn">
+        <span>SANYAMGARG.COM</span>
+        <span class="arrow">→</span>
+    </a>
 </header>
 
 <main class="grid">
@@ -64,16 +74,12 @@
                 <span>PYTHON</span>
                 <span>FASTAPI</span>
                 <span>SQLITE</span>
-                <span>LEAFLET.JS</span>
+                <span>D3.JS</span>
+                <span>TOPOJSON</span>
                 <span>CHART.JS</span>
                 <span>DOCKER</span>
             </div>
         </section>
-
-        <a href="https://sanyamgarg.com" target="_blank" rel="noopener noreferrer" class="port-btn">
-            <span>SANYAMGARG.COM</span>
-            <span class="arrow">→</span>
-        </a>
 
     </aside>
 
@@ -94,38 +100,37 @@
             </div>
         </section>
 
-        <div class="bottom-row">
-
-            <section class="block" data-label="05">
-                <h2>USERS // TOP_05</h2>
-                <div class="chart-wrap">
-                    <canvas id="userChart"></canvas>
-                </div>
-            </section>
-
-            <section class="block" data-label="06">
-                <h2>ORIGINS // TOP_05</h2>
-                <div class="chart-wrap">
-                    <canvas id="countryChart"></canvas>
-                </div>
-            </section>
-
-            <section class="block log-block" data-label="07">
-                <h2>FEED // LIVE</h2>
-                <div class="log-feed" id="log-list">
-                    <div class="log-empty">AWAITING_PACKETS...</div>
-                </div>
-            </section>
-
-        </div>
-
     </section>
 
 </main>
 
+<section class="bottom-row">
+
+    <section class="block" data-label="05">
+        <h2>USERS // TOP_05</h2>
+        <div class="chart-wrap">
+            <canvas id="userChart"></canvas>
+        </div>
+    </section>
+
+    <section class="block" data-label="06">
+        <h2>ORIGINS // TOP_05</h2>
+        <div class="chart-wrap">
+            <canvas id="countryChart"></canvas>
+        </div>
+    </section>
+
+    <section class="block log-block" data-label="07">
+        <h2>FEED // LIVE</h2>
+        <div class="log-feed" id="log-list">
+            <div class="log-empty">AWAITING_PACKETS...</div>
+        </div>
+    </section>
+
+</section>
+
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-<script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="script.js?v=20260423a"></script>
+<script src="script.js?v=20260423c"></script>
 </body>
 </html>
